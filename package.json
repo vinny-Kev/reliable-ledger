@@ -1,0 +1,21 @@
+{
+  "name": "reliable-ledger",
+  "version": "0.1.0",
+  "description": "Reference service for correctness-critical payment APIs: idempotent requests, row-locked transfers, an append-only audit log, tenant isolation and a retrying outbox.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "worker": "node src/worker/run.js",
+    "migrate": "node src/migrate.js",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  }
+}
