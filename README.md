@@ -1,16 +1,36 @@
 # reliable-ledger
 
-A small reference service for correctness-critical payment APIs, built on Express 5 and PostgreSQL.
+A reference implementation of **how I design, build and harden backend systems where correctness matters**.
 
-It moves money between accounts, and it is built around the failure modes that matter in payments:
-- a client retrying a request it thinks failed;
-- two requests racing for the same balance;
-- someone trying to quietly edit history;
-- a downstream system that is temporarily unavailable.
+The domain is a small payment ledger (accounts, transfers, an audit trail and event delivery) on Express 5 and PostgreSQL. The domain is incidental. The point is the method, and this repo is a worked example of it.
 
-Each of those has a mechanism here and a test that runs against a real Postgres database.
+> **What this is, and isn't.** It is a reference, not a product and not a framework to install. It is written from scratch to show the patterns I use in my own commercial systems. None of that work's code, schema or business logic is included. Read it to see how I reason about failure, not as a drop-in library.
 
-> This is a reference implementation, not a product. It is written from scratch to show patterns I use in commercial work. None of that work's code, schema or business logic is included.
+## How I approach reliability
+
+Every mechanism in this repo follows the same four steps:
+
+1. **Start from how it fails.** Retries, races, tampering and outages, not the happy path.
+2. **Put the guarantee in the database when I can.** Constraints, row locks and triggers hold even when application code has a bug.
+3. **Prove it against real PostgreSQL.** No mocks for anything that depends on transactions or locking.
+4. **Check that the tests can fail.** I broke the code on purpose three ways (see Testing) and confirmed the suite caught each one.
+
+The decisions and their trade-offs are written up as ADRs in [`docs/adr/`](docs/adr/).
+
+## How I harden a system
+
+What "hardened" means here, layer by layer. Everything below is in the code. Most of it is also covered by a test. The two exceptions are the 32 KB body cap and the guarantee that unexpected internal errors never reach the client, which are implemented but not directly tested.
+
+| Layer | What I do |
+|---|---|
+| **Requests** | Mutating endpoints require an `Idempotency-Key`. Input is validated strictly (positive safe integers, 3-letter currency codes, no self-transfers). Bodies are capped at 32 KB. Errors are a stable `{ code, message }` shape that never leaks SQL or stack traces. |
+| **Access** | API keys are stored only as SHA-256 hashes. Roles map to explicit permissions per endpoint. Every query is tenant-scoped, and another tenant's id is indistinguishable from a missing one (404, not 403). |
+| **Data** | Money is integer minor units, never floats. `CHECK (balance >= 0)` backs up the application's balance check. Account rows are locked in a fixed order, so concurrent transfers can neither overdraw nor deadlock. Every balance change has a ledger entry. |
+| **History** | The audit log is append-only, enforced by database triggers on UPDATE, DELETE and TRUNCATE. Audit rows commit in the same transaction as the change they describe. |
+| **Failure handling** | Side effects go through a transactional outbox, so an event exists if and only if the change committed. Delivery retries with exponential backoff and ends in a dead-letter state instead of retrying forever. |
+| **Operations** | Migrations run under an advisory lock, so two instances starting together cannot apply a file twice. CI runs the full suite on real PostgreSQL and fails on high-severity dependency advisories. |
+
+**What I deliberately left out**, and would add before running this for real: rate limiting, API key rotation and expiry, idempotency-key expiry, pagination, and logging and metrics. They're listed under [Known limitations](#known-limitations). Naming the gaps is part of the method.
 
 ## What it demonstrates
 
